@@ -9,7 +9,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
       body { margin: 0; background-color: #050505; color: white; overflow: hidden; }
-      canvas { touch-action: none; }
+      canvas { touch-action: none; outline: none; }
       /* Hide scrollbars */
       ::-webkit-scrollbar { width: 0px; background: transparent; }
     </style>
@@ -22,7 +22,7 @@
     <!-- 3. Babel Standalone -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-    <!-- 4. Import Map (FIXED: Removed conflicting React 19 entries) -->
+    <!-- 4. Import Map (Cleaned to strictly use React 18.2.0) -->
     <script type="importmap">
 {
   "imports": {
@@ -40,8 +40,7 @@
   }
 }
 </script>
-  <link rel="stylesheet" href="/index.css">
-</head>
+  </head>
   <body>
     <div id="root"></div>
 
@@ -325,45 +324,26 @@
         );
       };
 
-      // 2. HandManager Component
+      // 2. HandManager Component (Manual Loop for Safety)
       const HandManager = ({ onGestureDetected }) => {
         const videoRef = useRef(null);
+        const handsRef = useRef(null);
+        const requestRef = useRef(null);
+        const isMounted = useRef(true);
         const [loading, setLoading] = useState(true);
         const [error, setError] = useState(null);
+
+        useEffect(() => {
+          isMounted.current = true;
+          return () => { isMounted.current = false; };
+        }, []);
 
         useEffect(() => {
           const videoElement = videoRef.current;
           if (!videoElement) return;
 
-          let camera = null;
-          let hands = null;
-
-          const detectGesture = (landmarks) => {
-            const isFingerOpen = (tipIdx, pipIdx) => landmarks[tipIdx].y < landmarks[pipIdx].y;
-            const indexOpen = isFingerOpen(8, 6);
-            const middleOpen = isFingerOpen(12, 10);
-            const ringOpen = isFingerOpen(16, 14);
-            const pinkyOpen = isFingerOpen(20, 18);
-            const thumbTip = landmarks[4];
-            const thumbIP = landmarks[3];
-            const thumbMCP = landmarks[2];
-            
-            // Thumb Down Logic
-            const isThumbPointingDown = thumbTip.y > thumbMCP.y + 0.05; 
-            
-            const pinchDistance = Math.hypot(landmarks[4].x - landmarks[8].x, landmarks[4].y - landmarks[8].y);
-
-            if (isThumbPointingDown && !indexOpen && !middleOpen && !ringOpen && !pinkyOpen) {
-                 return GestureType.THUMBS_DOWN;
-            }
-
-            if (!indexOpen && !middleOpen && !ringOpen && !pinkyOpen) return GestureType.FIST;
-            if (pinchDistance < 0.05) return GestureType.PINCH;
-            if ((indexOpen && middleOpen && ringOpen) || (middleOpen && ringOpen && pinkyOpen)) return GestureType.OPEN;
-            return GestureType.NONE;
-          };
-
           const onResults = (results) => {
+            if (!isMounted.current) return;
             setLoading(false);
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
               const landmarks = results.multiHandLandmarks[0];
@@ -371,7 +351,24 @@
               const palmY = (landmarks[0].y + landmarks[9].y) / 2;
               const normalizedX = (0.5 - palmX) * 4; 
               const normalizedY = (0.5 - palmY) * 2;
-              const gesture = detectGesture(landmarks);
+              
+              const isFingerOpen = (tipIdx, pipIdx) => landmarks[tipIdx].y < landmarks[pipIdx].y;
+              const indexOpen = isFingerOpen(8, 6);
+              const middleOpen = isFingerOpen(12, 10);
+              const ringOpen = isFingerOpen(16, 14);
+              const pinkyOpen = isFingerOpen(20, 18);
+              const thumbTip = landmarks[4];
+              const thumbMCP = landmarks[2];
+              
+              const isThumbPointingDown = thumbTip.y > thumbMCP.y + 0.05; 
+              const pinchDistance = Math.hypot(landmarks[4].x - landmarks[8].x, landmarks[4].y - landmarks[8].y);
+
+              let gesture = GestureType.NONE;
+              if (isThumbPointingDown && !indexOpen && !middleOpen && !ringOpen && !pinkyOpen) gesture = GestureType.THUMBS_DOWN;
+              else if (!indexOpen && !middleOpen && !ringOpen && !pinkyOpen) gesture = GestureType.FIST;
+              else if (pinchDistance < 0.05) gesture = GestureType.PINCH;
+              else if ((indexOpen && middleOpen && ringOpen) || (middleOpen && ringOpen && pinkyOpen)) gesture = GestureType.OPEN;
+              
               onGestureDetected(gesture, normalizedX, normalizedY);
             } else {
               onGestureDetected(GestureType.NONE, 0, 0);
@@ -380,45 +377,67 @@
 
           const initializeMediaPipe = async () => {
             try {
-              if (!window.Hands) {
-                throw new Error("MediaPipe Hands not loaded");
-              }
+              if (!window.Hands) throw new Error("MediaPipe Hands not loaded");
               
-              hands = new window.Hands({
+              handsRef.current = new window.Hands({
                 locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
               });
               
-              hands.setOptions({
+              handsRef.current.setOptions({
                 maxNumHands: 1,
                 modelComplexity: 1,
                 minDetectionConfidence: 0.5,
                 minTrackingConfidence: 0.5,
               });
               
-              hands.onResults(onResults);
+              handsRef.current.onResults(onResults);
               
-              if (window.Camera && videoElement) {
-                camera = new window.Camera(videoElement, {
-                  onFrame: async () => await hands.send({ image: videoElement }),
-                  width: 640,
-                  height: 480,
-                });
-                
-                await camera.start();
-              } else {
-                throw new Error("Camera utility not found");
+              const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { 
+                  width: { ideal: 640 }, 
+                  height: { ideal: 480 },
+                  facingMode: "user"
+                } 
+              });
+
+              if (!isMounted.current) {
+                stream.getTracks().forEach(t => t.stop());
+                return;
               }
+              
+              videoElement.srcObject = stream;
+              await videoElement.play();
+
+              const loop = async () => {
+                if (!isMounted.current || !videoRef.current) return;
+                if (videoRef.current.readyState >= 2) {
+                  try {
+                    await handsRef.current.send({ image: videoRef.current });
+                  } catch (e) { }
+                }
+                requestRef.current = requestAnimationFrame(loop);
+              };
+
+              loop();
+
             } catch (err) {
-              console.error("Camera init failed:", err);
-              setLoading(false);
-              setError(err.message || "Camera blocked or not found");
+              console.error("Camera Init Error:", err);
+              if (isMounted.current) setError(err.message || "Camera blocked or not found");
             }
           };
 
           initializeMediaPipe();
+
           return () => {
-            if (camera) camera.stop();
-            if (hands) hands.close();
+            if (requestRef.current) cancelAnimationFrame(requestRef.current);
+            if (videoElement && videoElement.srcObject) {
+              const stream = videoElement.srcObject;
+              const tracks = stream.getTracks();
+              tracks.forEach(t => t.stop());
+            }
+            if (handsRef.current) {
+               handsRef.current = null; 
+            }
           };
         }, [onGestureDetected]);
 
@@ -605,6 +624,5 @@
       const root = ReactDOM.createRoot(document.getElementById('root'));
       root.render(<App />);
     </script>
-  <script type="module" src="/index.tsx"></script>
-</body>
+  </body>
 </html>
