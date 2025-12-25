@@ -1,0 +1,14 @@
+export const COLORS = {
+  MATTE_GREEN: '#2F5A2F',
+  BRIGHT_GREEN: '#4ade80',
+  METALLIC_GOLD: '#FFD700',
+  CHRISTMAS_RED: '#C41E3A',
+  WHITE: '#FFFFFF',
+};
+
+export const CONFIG = {
+  PARTICLE_COUNT: 1200,
+  TREE_HEIGHT: 12,
+  TREE_RADIUS_BOTTOM: 4.5, // Slightly wider base
+  SCATTER_RADIUS: 15,
+};
