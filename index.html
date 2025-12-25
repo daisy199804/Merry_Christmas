@@ -4,33 +4,605 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Gesture Christmas Tree</title>
+    
+    <!-- 1. Utilities and Styles -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
     <style>
       body { margin: 0; background-color: #050505; color: white; overflow: hidden; }
       canvas { touch-action: none; }
+      /* Hide scrollbars */
+      ::-webkit-scrollbar { width: 0px; background: transparent; }
     </style>
-  <script type="importmap">
+
+    <!-- 2. MediaPipe Dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+
+    <!-- 3. Babel Standalone -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- 4. Import Map (FIXED: Removed conflicting React 19 entries) -->
+    <script type="importmap">
 {
   "imports": {
-    "react/": "https://esm.sh/react@^19.2.3/",
-    "react": "https://esm.sh/react@^19.2.3",
-    "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
+    "react": "https://esm.sh/react@18.2.0",
+    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+    "three": "https://esm.sh/three@0.160.0",
+    "@react-three/fiber": "https://esm.sh/@react-three/fiber@8.15.16?deps=three@0.160.0,react@18.2.0,react-dom@18.2.0",
+    "@react-three/drei": "https://esm.sh/@react-three/drei@9.99.0?deps=three@0.160.0,react@18.2.0,react-dom@18.2.0,@react-three/fiber@8.15.16",
+    "@react-three/postprocessing": "https://esm.sh/@react-three/postprocessing@2.16.0?deps=three@0.160.0,react@18.2.0,react-dom@18.2.0,@react-three/fiber@8.15.16",
+    "maath/easing": "https://esm.sh/maath@0.10.7/easing?deps=three@0.160.0",
+    "lucide-react": "https://esm.sh/lucide-react@0.292.0?deps=react@18.2.0",
     "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
-    "three": "https://esm.sh/three@^0.182.0",
-    "maath/": "https://esm.sh/maath@^0.10.8/",
-    "@react-three/drei": "https://esm.sh/@react-three/drei@^10.7.7",
-    "@react-three/postprocessing": "https://esm.sh/@react-three/postprocessing@^3.0.4",
-    "@react-three/fiber": "https://esm.sh/@react-three/fiber@^9.4.2"
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "maath/": "https://esm.sh/maath@^0.10.8/"
   }
 }
 </script>
-<link rel="stylesheet" href="/index.css">
-</head>
+  </head>
   <body>
     <div id="root"></div>
-  <script type="module" src="/index.tsx"></script>
-</body>
+
+    <!-- MAIN APPLICATION SCRIPT -->
+    <script type="text/babel" data-type="module">
+      import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react';
+      import ReactDOM from 'react-dom/client';
+      import { Canvas, useFrame, useThree } from '@react-three/fiber';
+      import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing';
+      import { Loader, Float, Environment, Image, Text } from '@react-three/drei';
+      import * as THREE from 'three';
+      import { damp3, dampQ, damp } from 'maath/easing';
+      import { Upload, Hand, Grip, ZoomIn, Trash2, AlertCircle } from 'lucide-react';
+
+      // --- CONSTANTS ---
+      const COLORS = {
+        MATTE_GREEN: '#2F5A2F',
+        BRIGHT_GREEN: '#4ade80',
+        METALLIC_GOLD: '#FFD700',
+        CHRISTMAS_RED: '#C41E3A',
+        WHITE: '#FFFFFF',
+      };
+
+      const CONFIG = {
+        PARTICLE_COUNT: 1200,
+        TREE_HEIGHT: 12,
+        TREE_RADIUS_BOTTOM: 4.5,
+        SCATTER_RADIUS: 15,
+      };
+
+      // --- TYPES ---
+      const AppState = {
+        TREE: 'TREE',
+        SCATTER: 'SCATTER',
+        FOCUS: 'FOCUS',
+      };
+
+      const GestureType = {
+        NONE: 'NONE',
+        FIST: 'FIST',
+        OPEN: 'OPEN',
+        PINCH: 'PINCH',
+        THUMBS_DOWN: 'THUMBS_DOWN',
+      };
+
+      // --- COMPONENTS ---
+
+      // 1. Experience Component
+      const Star = ({ appState }) => {
+        const ref = useRef(null);
+        
+        const starShape = useMemo(() => {
+          const shape = new THREE.Shape();
+          const points = 5;
+          const outerRadius = 0.8;
+          const innerRadius = 0.4;
+          
+          for (let i = 0; i < points * 2; i++) {
+            const angle = (i * Math.PI) / points;
+            const radius = i % 2 === 0 ? outerRadius : innerRadius;
+            const x = Math.cos(angle) * radius;
+            const y = Math.sin(angle) * radius;
+            if (i === 0) shape.moveTo(x, y);
+            else shape.lineTo(x, y);
+          }
+          shape.closePath();
+          return shape;
+        }, []);
+
+        const extrudeSettings = useMemo(() => ({
+          depth: 0.2,
+          bevelEnabled: true,
+          bevelThickness: 0.1,
+          bevelSize: 0.05,
+          bevelSegments: 2
+        }), []);
+
+        useFrame((state, delta) => {
+          if (!ref.current) return;
+          const targetY = appState === AppState.TREE ? CONFIG.TREE_HEIGHT / 2 + 1 : 10;
+          damp3(ref.current.position, [0, targetY, 0], 1, delta);
+          ref.current.rotation.y += delta; 
+        });
+
+        return (
+          <mesh ref={ref} rotation={[0, 0, 0]}>
+            <extrudeGeometry args={[starShape, extrudeSettings]} />
+            <meshStandardMaterial 
+              color={COLORS.METALLIC_GOLD} 
+              emissive={COLORS.METALLIC_GOLD}
+              emissiveIntensity={2}
+              toneMapped={false}
+            />
+            <pointLight intensity={2} color="yellow" distance={5} />
+          </mesh>
+        );
+      };
+
+      const Particle = ({ data, appState }) => {
+        const meshRef = useRef(null);
+        
+        useFrame((state, delta) => {
+          if (!meshRef.current) return;
+          const target = appState === AppState.TREE ? data.positionTree : data.positionScatter;
+          damp3(meshRef.current.position, target, 0.6 + Math.random() * 0.5, delta);
+          meshRef.current.rotation.x += delta * 0.5;
+          meshRef.current.rotation.y += delta * 0.5;
+        });
+
+        return (
+          <mesh ref={meshRef} scale={data.scale}>
+            {data.type === 'sphere' ? (
+              <sphereGeometry args={[1, 8, 8]} />
+            ) : (
+              <boxGeometry args={[1, 1, 1]} />
+            )}
+            <meshStandardMaterial 
+              color={data.color} 
+              metalness={0.8} 
+              roughness={0.2} 
+              emissive={data.color}
+              emissiveIntensity={0.2}
+            />
+          </mesh>
+        );
+      };
+
+      const PhotoMesh = ({ data, appState, isFocused, index }) => {
+        const ref = useRef(null);
+
+        useFrame((state, delta) => {
+          if (!ref.current) return;
+
+          let targetPos = appState === AppState.TREE ? data.positionTree : data.positionScatter;
+          let targetScale = 1.0;
+          let targetRot = [0, 0, 0];
+
+          if (appState === AppState.FOCUS) {
+            if (isFocused) {
+              targetPos = [0, 0, 5]; 
+              targetScale = 3.5;
+              targetRot = [0, 0, 0];
+            } else {
+              const originalScatter = data.positionScatter;
+              targetPos = [originalScatter[0] * 1.5, originalScatter[1] * 1.5, originalScatter[2] - 10];
+            }
+          } else if (appState === AppState.SCATTER) {
+            ref.current.lookAt(state.camera.position);
+          } else {
+             ref.current.lookAt(0, ref.current.position.y, 0);
+             ref.current.rotation.y += Math.PI; 
+          }
+
+          damp3(ref.current.position, targetPos, 0.5, delta);
+          damp(ref.current.scale, 'x', targetScale, 0.5, delta);
+          damp(ref.current.scale, 'y', targetScale, 0.5, delta);
+          
+          if (appState === AppState.FOCUS && isFocused) {
+             damp3(ref.current.rotation, [0, 0, 0], 0.5, delta);
+          }
+        });
+
+        return (
+          <group ref={ref}>
+            <Image 
+              url={data.url} 
+              scale={[1.5, 1.5]} 
+              transparent
+              opacity={appState === AppState.FOCUS && !isFocused ? 0.1 : 1}
+            />
+            <mesh position={[0, 0, -0.01]}>
+              <planeGeometry args={[1.6, 1.6]} />
+              <meshStandardMaterial color={COLORS.METALLIC_GOLD} metalness={1} roughness={0.1} />
+            </mesh>
+          </group>
+        );
+      };
+
+      const Experience = ({ appState, photos, focusedPhotoIndex, handPositionRef }) => {
+        const groupRef = useRef(null);
+
+        const { particles, photoPositions } = useMemo(() => {
+          const tempParticles = [];
+          const tempPhotoPositions = [];
+          const count = CONFIG.PARTICLE_COUNT;
+          const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+
+          for (let i = 0; i < count; i++) {
+            const t = i / count; 
+            const yTree = CONFIG.TREE_HEIGHT * (t - 0.5);
+            const normalizedY = (yTree + CONFIG.TREE_HEIGHT / 2) / CONFIG.TREE_HEIGHT; 
+            const maxRadiusAtY = CONFIG.TREE_RADIUS_BOTTOM * Math.pow((1 - normalizedY), 0.9) + 0.2;
+            const theta = i * goldenAngle; 
+            const isSurface = Math.random() > 0.2;
+            const rScale = isSurface ? 0.9 + Math.random() * 0.2 : Math.random() * 0.8;
+            const rCurrent = maxRadiusAtY * rScale;
+            const xTree = Math.cos(theta) * rCurrent;
+            const zTree = Math.sin(theta) * rCurrent;
+
+            const rScatter = CONFIG.SCATTER_RADIUS * Math.cbrt(Math.random());
+            const thetaScatter = Math.random() * 2 * Math.PI;
+            const phiScatter = Math.acos(2 * Math.random() - 1);
+            const xScatter = rScatter * Math.sin(phiScatter) * Math.cos(thetaScatter);
+            const yScatter = rScatter * Math.sin(phiScatter) * Math.sin(thetaScatter);
+            const zScatter = rScatter * Math.cos(phiScatter);
+
+            const type = Math.random() > 0.65 ? 'sphere' : (Math.random() > 0.5 ? 'cube' : 'candy');
+            let color;
+            const randColor = Math.random();
+            if (randColor > 0.8) color = COLORS.METALLIC_GOLD;
+            else if (randColor > 0.55) color = COLORS.CHRISTMAS_RED;
+            else if (randColor > 0.25) color = COLORS.BRIGHT_GREEN;
+            else color = COLORS.MATTE_GREEN;
+            if (Math.random() > 0.92) color = COLORS.WHITE;
+
+            tempParticles.push({
+              id: i,
+              type,
+              positionTree: [xTree, yTree, zTree],
+              positionScatter: [xScatter, yScatter, zScatter],
+              color,
+              scale: Math.random() * 0.2 + 0.08,
+            });
+          }
+
+          photos.forEach((photoUrl, i) => {
+            const theta = (i / photos.length) * Math.PI * 8;
+            const yTree = (i / photos.length - 0.5) * CONFIG.TREE_HEIGHT * 0.7;
+            const normalizedY = (yTree + CONFIG.TREE_HEIGHT / 2) / CONFIG.TREE_HEIGHT;
+            const radiusAtY = (CONFIG.TREE_RADIUS_BOTTOM + 1.2) * (1 - normalizedY) + 0.5;
+            const xTree = Math.cos(theta) * radiusAtY;
+            const zTree = Math.sin(theta) * radiusAtY;
+            const xScatter = (Math.random() - 0.5) * 16;
+            const yScatter = (Math.random() - 0.5) * 12;
+            const zScatter = (Math.random() - 0.5) * 8;
+
+            tempPhotoPositions.push({
+              id: `photo-${i}`,
+              url: photoUrl,
+              positionTree: [xTree, yTree, zTree],
+              positionScatter: [xScatter, yScatter, zScatter],
+              rotation: [0, Math.random() * 0.5, 0],
+              aspectRatio: 1, 
+            });
+          });
+
+          return { particles: tempParticles, photoPositions: tempPhotoPositions };
+        }, [photos]);
+
+        useFrame((state, delta) => {
+          if (!groupRef.current) return;
+          if (appState === AppState.SCATTER) {
+              const targetX = handPositionRef.current.y * 0.5;
+              const targetY = handPositionRef.current.x * 0.5;
+              damp3(state.camera.rotation, [targetX, targetY, 0], 0.5, delta);
+          } else if (appState === AppState.TREE) {
+              groupRef.current.rotation.y += delta * 0.15;
+              damp3(state.camera.position, [0, 0, 18], 1, delta);
+              damp3(state.camera.rotation, [0, 0, 0], 1, delta);
+          } else if (appState === AppState.FOCUS) {
+              damp3(state.camera.position, [0, 0, 8], 1, delta);
+              damp3(state.camera.rotation, [0, 0, 0], 1, delta);
+          }
+        });
+
+        return (
+          <>
+            <Environment preset="forest" />
+            <ambientLight intensity={0.4} color={COLORS.MATTE_GREEN} />
+            <pointLight position={[10, 10, 10]} intensity={1.5} color={COLORS.METALLIC_GOLD} />
+            <spotLight position={[-10, 15, 0]} angle={0.3} penumbra={1} intensity={2} color={COLORS.CHRISTMAS_RED} castShadow />
+            <pointLight position={[0, 0, -10]} intensity={1} color="#004400" />
+            <group ref={groupRef}>
+              {particles.map((p) => <Particle key={p.id} data={p} appState={appState} />)}
+              {photoPositions.map((p, i) => (
+                <PhotoMesh key={p.id} data={p} index={i} appState={appState} isFocused={focusedPhotoIndex === i} />
+              ))}
+              <Star appState={appState} />
+            </group>
+          </>
+        );
+      };
+
+      // 2. HandManager Component
+      const HandManager = ({ onGestureDetected }) => {
+        const videoRef = useRef(null);
+        const [loading, setLoading] = useState(true);
+        const [error, setError] = useState(null);
+
+        useEffect(() => {
+          const videoElement = videoRef.current;
+          if (!videoElement) return;
+
+          let camera = null;
+          let hands = null;
+
+          const detectGesture = (landmarks) => {
+            const isFingerOpen = (tipIdx, pipIdx) => landmarks[tipIdx].y < landmarks[pipIdx].y;
+            const indexOpen = isFingerOpen(8, 6);
+            const middleOpen = isFingerOpen(12, 10);
+            const ringOpen = isFingerOpen(16, 14);
+            const pinkyOpen = isFingerOpen(20, 18);
+            const thumbTip = landmarks[4];
+            const thumbIP = landmarks[3];
+            const thumbMCP = landmarks[2];
+            
+            // Thumb Down Logic
+            const isThumbPointingDown = thumbTip.y > thumbMCP.y + 0.05; 
+            
+            const pinchDistance = Math.hypot(landmarks[4].x - landmarks[8].x, landmarks[4].y - landmarks[8].y);
+
+            if (isThumbPointingDown && !indexOpen && !middleOpen && !ringOpen && !pinkyOpen) {
+                 return GestureType.THUMBS_DOWN;
+            }
+
+            if (!indexOpen && !middleOpen && !ringOpen && !pinkyOpen) return GestureType.FIST;
+            if (pinchDistance < 0.05) return GestureType.PINCH;
+            if ((indexOpen && middleOpen && ringOpen) || (middleOpen && ringOpen && pinkyOpen)) return GestureType.OPEN;
+            return GestureType.NONE;
+          };
+
+          const onResults = (results) => {
+            setLoading(false);
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+              const landmarks = results.multiHandLandmarks[0];
+              const palmX = (landmarks[0].x + landmarks[9].x) / 2;
+              const palmY = (landmarks[0].y + landmarks[9].y) / 2;
+              const normalizedX = (0.5 - palmX) * 4; 
+              const normalizedY = (0.5 - palmY) * 2;
+              const gesture = detectGesture(landmarks);
+              onGestureDetected(gesture, normalizedX, normalizedY);
+            } else {
+              onGestureDetected(GestureType.NONE, 0, 0);
+            }
+          };
+
+          const initializeMediaPipe = async () => {
+            try {
+              if (!window.Hands) {
+                throw new Error("MediaPipe Hands not loaded");
+              }
+              
+              hands = new window.Hands({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
+              });
+              
+              hands.setOptions({
+                maxNumHands: 1,
+                modelComplexity: 1,
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5,
+              });
+              
+              hands.onResults(onResults);
+              
+              if (window.Camera && videoElement) {
+                camera = new window.Camera(videoElement, {
+                  onFrame: async () => await hands.send({ image: videoElement }),
+                  width: 640,
+                  height: 480,
+                });
+                
+                await camera.start();
+              } else {
+                throw new Error("Camera utility not found");
+              }
+            } catch (err) {
+              console.error("Camera init failed:", err);
+              setLoading(false);
+              setError(err.message || "Camera blocked or not found");
+            }
+          };
+
+          initializeMediaPipe();
+          return () => {
+            if (camera) camera.stop();
+            if (hands) hands.close();
+          };
+        }, [onGestureDetected]);
+
+        return (
+          <>
+            <video
+              ref={videoRef}
+              className="fixed bottom-4 right-4 w-48 h-36 object-cover rounded-lg border-2 border-green-800 z-50 opacity-80 mix-blend-screen scale-x-[-1]"
+              playsInline
+              muted
+            />
+            {loading && !error && <div className="fixed bottom-20 right-4 text-green-500 text-sm animate-pulse">Initializing Vision AI...</div>}
+            {error && (
+              <div className="fixed bottom-20 right-4 text-red-400 text-sm flex items-center gap-2 bg-black/80 p-2 rounded border border-red-500/50">
+                <AlertCircle size={14} />
+                <span>{error}</span>
+              </div>
+            )}
+          </>
+        );
+      };
+
+      // 3. InterfaceOverlay Component
+      const InterfaceOverlay = ({ appState, currentGesture, onFileUpload, photoCount, isFocusMode, onRemovePhoto }) => {
+        const getGestureColor = (target) => 
+          currentGesture === target ? 'text-yellow-400 scale-110 drop-shadow-[0_0_10px_rgba(255,215,0,0.8)]' : 'text-white/50';
+
+        return (
+          <div className="absolute inset-0 pointer-events-none p-8 flex flex-col justify-between z-10">
+            <div className="flex justify-between items-start pointer-events-auto">
+              <div>
+                <h1 className="text-4xl font-serif text-yellow-500 tracking-wider drop-shadow-lg">
+                  NOEL <span className="text-red-600">MAGIC</span>
+                </h1>
+                <p className="text-green-200/80 text-sm mt-1 uppercase tracking-widest">
+                  Interactive 3D Gesture Experience
+                </p>
+              </div>
+              <label className="flex items-center gap-3 bg-green-900/40 backdrop-blur-md px-6 py-3 rounded-full border border-green-700/50 hover:bg-green-800/60 transition cursor-pointer group">
+                <Upload size={18} className="text-yellow-500 group-hover:scale-110 transition" />
+                <span className="text-xs font-bold text-green-100 tracking-widest">ADD MEMORY ({photoCount})</span>
+                <input type="file" onChange={onFileUpload} className="hidden" accept="image/*" />
+              </label>
+            </div>
+
+            <div className="absolute top-1/2 left-8 transform -translate-y-1/2 space-y-2">
+              <div className={`w-1 h-16 rounded-full transition-all duration-500 ${appState === AppState.TREE ? 'bg-yellow-500 shadow-[0_0_20px_orange]' : 'bg-gray-800'}`} />
+              <div className={`w-1 h-16 rounded-full transition-all duration-500 ${appState === AppState.SCATTER ? 'bg-green-500 shadow-[0_0_20px_green]' : 'bg-gray-800'}`} />
+              <div className={`w-1 h-16 rounded-full transition-all duration-500 ${appState === AppState.FOCUS ? 'bg-red-500 shadow-[0_0_20px_red]' : 'bg-gray-800'}`} />
+            </div>
+
+            {isFocusMode && (
+              <div className="absolute top-1/2 right-8 transform -translate-y-1/2 pointer-events-auto flex flex-col items-center gap-4 animate-in fade-in slide-in-from-right-10 duration-500">
+                <div className={`flex flex-col items-center gap-1 transition-all duration-300 ${currentGesture === GestureType.THUMBS_DOWN ? 'opacity-100 scale-110' : 'opacity-0'}`}>
+                   <span className="text-red-500 font-bold text-xs tracking-widest uppercase">Deleting...</span>
+                </div>
+                <button 
+                  onClick={onRemovePhoto}
+                  className={`bg-red-900/30 backdrop-blur-md p-6 rounded-full border border-red-500/30 hover:bg-red-800/50 transition-all hover:scale-110 group shadow-[0_0_30px_rgba(200,0,0,0.3)] ${currentGesture === GestureType.THUMBS_DOWN ? 'ring-4 ring-red-500 scale-110 bg-red-800' : ''}`}
+                >
+                  <Trash2 size={32} className="text-red-500 group-hover:text-red-200" />
+                </button>
+                <div className="flex flex-col items-center">
+                    <span className="text-[10px] font-bold tracking-widest uppercase text-red-500/50">Remove</span>
+                    <span className="text-[8px] font-bold tracking-widest uppercase text-white/20 mt-1">(or Thumbs Down)</span>
+                </div>
+              </div>
+            )}
+
+            <div className="flex flex-col items-center gap-6">
+              <div className="flex gap-12 bg-black/60 backdrop-blur-md px-10 py-4 rounded-2xl border border-white/10">
+                <div className={`flex flex-col items-center gap-2 transition-all ${getGestureColor(GestureType.FIST)}`}>
+                  <div className="bg-white/10 p-3 rounded-full"><Grip size={24} /></div>
+                  <span className="text-[10px] font-bold tracking-widest uppercase">Fist • Tree</span>
+                </div>
+                <div className={`flex flex-col items-center gap-2 transition-all ${getGestureColor(GestureType.OPEN)}`}>
+                  <div className="bg-white/10 p-3 rounded-full"><Hand size={24} /></div>
+                  <span className="text-[10px] font-bold tracking-widest uppercase">Open • Scatter</span>
+                </div>
+                <div className={`flex flex-col items-center gap-2 transition-all ${getGestureColor(GestureType.PINCH)}`}>
+                  <div className="bg-white/10 p-3 rounded-full"><ZoomIn size={24} /></div>
+                  <span className="text-[10px] font-bold tracking-widest uppercase">Pinch • Focus</span>
+                </div>
+              </div>
+              <div className="text-white/30 text-xs">Use your hand in front of the camera to control the magic.</div>
+            </div>
+          </div>
+        );
+      };
+
+      // 4. Main App Component
+      const App = () => {
+        const [appState, setAppState] = useState(AppState.TREE);
+        const [currentGesture, setCurrentGesture] = useState(GestureType.NONE);
+        const [photos, setPhotos] = useState([
+          'https://picsum.photos/400/600',
+          'https://picsum.photos/400/400',
+          'https://picsum.photos/500/400',
+          'https://picsum.photos/400/500',
+        ]);
+        const [focusedPhotoIndex, setFocusedPhotoIndex] = useState(null);
+        const handPositionRef = useRef({ x: 0, y: 0 });
+        const lastActionTimeRef = useRef(0);
+
+        const handleRemovePhoto = useCallback(() => {
+          if (focusedPhotoIndex !== null) {
+            if (photos[focusedPhotoIndex].startsWith('blob:')) {
+              URL.revokeObjectURL(photos[focusedPhotoIndex]);
+            }
+            setPhotos((prev) => prev.filter((_, i) => i !== focusedPhotoIndex));
+            setFocusedPhotoIndex(null);
+            setAppState(AppState.SCATTER);
+          }
+        }, [focusedPhotoIndex, photos]);
+
+        const handleGestureDetected = useCallback((gesture, handX, handY) => {
+          setCurrentGesture(gesture);
+          handPositionRef.current = { x: handX, y: handY };
+
+          const now = Date.now();
+          if (now - lastActionTimeRef.current < 500) return;
+
+          setAppState((prev) => {
+            if (gesture === GestureType.THUMBS_DOWN && prev === AppState.FOCUS) {
+               handleRemovePhoto();
+               lastActionTimeRef.current = now;
+               return AppState.SCATTER;
+            }
+            if (gesture === GestureType.FIST && prev !== AppState.TREE) {
+              lastActionTimeRef.current = now;
+              return AppState.TREE;
+            }
+            if (gesture === GestureType.OPEN && prev !== AppState.SCATTER) {
+              setFocusedPhotoIndex(null);
+              lastActionTimeRef.current = now;
+              return AppState.SCATTER;
+            }
+            if (gesture === GestureType.PINCH && prev === AppState.SCATTER) {
+              setFocusedPhotoIndex((prevIndex) => (prevIndex === null ? 0 : (prevIndex + 1) % photos.length));
+              lastActionTimeRef.current = now;
+              return AppState.FOCUS;
+            }
+            return prev;
+          });
+        }, [photos.length, handleRemovePhoto]);
+
+        const handlePhotoUpload = (e) => {
+          if (e.target.files && e.target.files[0]) {
+            const url = URL.createObjectURL(e.target.files[0]);
+            setPhotos((prev) => [...prev, url]);
+          }
+        };
+
+        return (
+          <div className="w-full h-screen bg-black relative overflow-hidden font-sans">
+            <Canvas shadows camera={{ position: [0, 0, 18], fov: 45 }} gl={{ antialias: false }} dpr={[1, 2]}>
+              <color attach="background" args={['#051005']} />
+              <Experience 
+                appState={appState} 
+                photos={photos} 
+                focusedPhotoIndex={focusedPhotoIndex}
+                handPositionRef={handPositionRef}
+              />
+              <EffectComposer disableNormalPass>
+                <Bloom luminanceThreshold={0.5} mipmapBlur intensity={1.5} radius={0.6} />
+                <Vignette eskil={false} offset={0.1} darkness={0.6} />
+              </EffectComposer>
+            </Canvas>
+            <Loader />
+            <HandManager onGestureDetected={handleGestureDetected} />
+            <InterfaceOverlay 
+              appState={appState} 
+              currentGesture={currentGesture} 
+              onFileUpload={handlePhotoUpload} 
+              photoCount={photos.length}
+              isFocusMode={appState === AppState.FOCUS && focusedPhotoIndex !== null}
+              onRemovePhoto={handleRemovePhoto}
+            />
+          </div>
+        );
+      };
+
+      // --- MOUNT ---
+      const root = ReactDOM.createRoot(document.getElementById('root'));
+      root.render(<App />);
+    </script>
+  </body>
 </html>
