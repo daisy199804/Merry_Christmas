@@ -6,7 +6,7 @@
     <title>Gesture Christmas Tree</title>
     
     <!-- 1. Utilities and Styles -->
-    <script src="https://cdn.tailwindcss.com" crossorigin="anonymous"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
       body { margin: 0; background-color: #050505; color: white; overflow: hidden; }
       canvas { touch-action: none; outline: none; }
@@ -20,9 +20,9 @@
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
 
     <!-- 3. Babel Standalone -->
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-    <!-- 4. Import Map (FIXED: Strictly React 18.2.0) -->
+    <!-- 4. Import Map (FIXED: React 18 & Dependencies) -->
     <script type="importmap">
 {
   "imports": {
@@ -55,7 +55,7 @@
       import { damp3, dampQ, damp } from 'maath/easing';
       import { Upload, Hand, Grip, ZoomIn, Trash2, AlertCircle } from 'lucide-react';
 
-      // --- CONSTANTS ---
+      // --- 1. CONSTANTS & TYPES (Merged) ---
       const COLORS = {
         MATTE_GREEN: '#2F5A2F',
         BRIGHT_GREEN: '#4ade80',
@@ -71,7 +71,7 @@
         SCATTER_RADIUS: 15,
       };
 
-      // --- TYPES ---
+      // Convert Enums to JS Objects for Babel compatibility
       const AppState = {
         TREE: 'TREE',
         SCATTER: 'SCATTER',
@@ -86,9 +86,9 @@
         THUMBS_DOWN: 'THUMBS_DOWN',
       };
 
-      // --- COMPONENTS ---
+      // --- 2. COMPONENTS ---
 
-      // 1. Experience Component
+      // --- Component: Star ---
       const Star = ({ appState }) => {
         const ref = useRef(null);
         
@@ -139,6 +139,7 @@
         );
       };
 
+      // --- Component: Particle ---
       const Particle = ({ data, appState }) => {
         const meshRef = useRef(null);
         
@@ -168,6 +169,7 @@
         );
       };
 
+      // --- Component: PhotoMesh ---
       const PhotoMesh = ({ data, appState, isFocused, index }) => {
         const ref = useRef(null);
 
@@ -219,6 +221,7 @@
         );
       };
 
+      // --- Component: Experience ---
       const Experience = ({ appState, photos, focusedPhotoIndex, handPositionRef }) => {
         const groupRef = useRef(null);
 
@@ -324,7 +327,7 @@
         );
       };
 
-      // 2. HandManager Component (Manual Loop for Safety)
+      // --- Component: HandManager ---
       const HandManager = ({ onGestureDetected }) => {
         const videoRef = useRef(null);
         const handsRef = useRef(null);
@@ -441,17 +444,18 @@
           };
         }, [onGestureDetected]);
 
+        // FIXED: Lower z-index (40) so it is behind the UI (50)
         return (
           <>
             <video
               ref={videoRef}
-              className="fixed bottom-4 right-4 w-48 h-36 object-cover rounded-lg border-2 border-green-800 z-50 opacity-80 mix-blend-screen scale-x-[-1]"
+              className="fixed bottom-4 right-4 w-48 h-36 object-cover rounded-lg border-2 border-green-800 z-40 opacity-80 mix-blend-screen scale-x-[-1]"
               playsInline
               muted
             />
-            {loading && !error && <div className="fixed bottom-20 right-4 text-green-500 text-sm animate-pulse">Initializing Vision AI...</div>}
+            {loading && !error && <div className="fixed bottom-20 right-4 text-green-500 text-sm animate-pulse z-40">Initializing Vision AI...</div>}
             {error && (
-              <div className="fixed bottom-20 right-4 text-red-400 text-sm flex items-center gap-2 bg-black/80 p-2 rounded border border-red-500/50">
+              <div className="fixed bottom-20 right-4 text-red-400 text-sm flex items-center gap-2 bg-black/80 p-2 rounded border border-red-500/50 z-40">
                 <AlertCircle size={14} />
                 <span>{error}</span>
               </div>
@@ -460,14 +464,15 @@
         );
       };
 
-      // 3. InterfaceOverlay Component
+      // --- Component: InterfaceOverlay ---
       const InterfaceOverlay = ({ appState, currentGesture, onFileUpload, photoCount, isFocusMode, onRemovePhoto }) => {
         const getGestureColor = (target) => 
           currentGesture === target ? 'text-yellow-400 scale-110 drop-shadow-[0_0_10px_rgba(255,215,0,0.8)]' : 'text-white/50';
 
+        // FIXED: Increased z-index to 50 to ensure it is ABOVE the video (z-40) and Canvas
         return (
-          <div className="absolute inset-0 pointer-events-none p-8 flex flex-col justify-between z-10">
-            <div className="flex justify-between items-start pointer-events-auto">
+          <div className="absolute inset-0 pointer-events-none p-8 flex flex-col justify-between z-50">
+            <div className="flex justify-between items-start pointer-events-auto w-full">
               <div>
                 <h1 className="text-4xl font-serif text-yellow-500 tracking-wider drop-shadow-lg">
                   NOEL <span className="text-red-600">MAGIC</span>
@@ -476,9 +481,9 @@
                   Interactive 3D Gesture Experience
                 </p>
               </div>
-              <label className="flex items-center gap-3 bg-green-900/40 backdrop-blur-md px-6 py-3 rounded-full border border-green-700/50 hover:bg-green-800/60 transition cursor-pointer group">
-                <Upload size={18} className="text-yellow-500 group-hover:scale-110 transition" />
-                <span className="text-xs font-bold text-green-100 tracking-widest">ADD MEMORY ({photoCount})</span>
+              <label className="flex items-center gap-3 bg-green-900 border border-yellow-500/30 px-6 py-3 rounded-full hover:bg-green-800 transition-all cursor-pointer group shadow-lg pointer-events-auto relative">
+                <Upload size={18} className="text-yellow-400 group-hover:scale-110 transition" />
+                <span className="text-xs font-bold text-white tracking-widest whitespace-nowrap">ADD MEMORY ({photoCount})</span>
                 <input type="file" onChange={onFileUpload} className="hidden" accept="image/*" />
               </label>
             </div>
@@ -508,7 +513,7 @@
             )}
 
             <div className="flex flex-col items-center gap-6">
-              <div className="flex gap-12 bg-black/60 backdrop-blur-md px-10 py-4 rounded-2xl border border-white/10">
+              <div className="flex gap-12 bg-black/80 backdrop-blur-md px-10 py-4 rounded-2xl border border-white/10 pointer-events-auto">
                 <div className={`flex flex-col items-center gap-2 transition-all ${getGestureColor(GestureType.FIST)}`}>
                   <div className="bg-white/10 p-3 rounded-full"><Grip size={24} /></div>
                   <span className="text-[10px] font-bold tracking-widest uppercase">Fist • Tree</span>
@@ -528,7 +533,7 @@
         );
       };
 
-      // 4. Main App Component
+      // --- Component: App (Main) ---
       const App = () => {
         const [appState, setAppState] = useState(AppState.TREE);
         const [currentGesture, setCurrentGesture] = useState(GestureType.NONE);
