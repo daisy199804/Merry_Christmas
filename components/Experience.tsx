@@ -13,6 +13,53 @@ interface ExperienceProps {
   handPositionRef: React.MutableRefObject<{ x: number; y: number }>;
 }
 
+// New Component: Golden Spiral Garland
+const Garland: React.FC<{ appState: AppState }> = ({ appState }) => {
+  const curve = useMemo(() => {
+    const points: THREE.Vector3[] = [];
+    const loops = 5.5;
+    const height = CONFIG.TREE_HEIGHT;
+    const radiusBase = CONFIG.TREE_RADIUS_BOTTOM + 0.4; // Sit slightly outside the branches
+    
+    // Create a tapered spiral path
+    for (let t = 0; t <= 1; t += 0.005) {
+      const y = height * (t - 0.5); // Bottom to top
+      const r = radiusBase * (1 - t) + 0.1; // Taper radius
+      const theta = t * Math.PI * 2 * loops;
+      points.push(new THREE.Vector3(Math.cos(theta) * r, y, Math.sin(theta) * r));
+    }
+    return new THREE.CatmullRomCurve3(points);
+  }, []);
+
+  const ref = useRef<THREE.Mesh>(null);
+
+  useFrame((state, delta) => {
+    if (!ref.current) return;
+    
+    // In Scatter mode, shrink the garland away. In Tree mode, show it.
+    const targetScale = appState === AppState.TREE ? 1 : 0;
+    damp3(ref.current.scale, [targetScale, targetScale, targetScale], 0.5, delta);
+    
+    // Gentle pulsing effect
+    if (appState === AppState.TREE) {
+       ref.current.rotation.y += delta * 0.05;
+    }
+  });
+
+  return (
+    <mesh ref={ref}>
+      <tubeGeometry args={[curve, 128, 0.12, 8, false]} />
+      <meshStandardMaterial 
+        color={COLORS.METALLIC_GOLD} 
+        emissive={COLORS.METALLIC_GOLD}
+        emissiveIntensity={0.6}
+        metalness={1.0} 
+        roughness={0.1} 
+      />
+    </mesh>
+  );
+};
+
 export const Experience: React.FC<ExperienceProps> = ({ 
   appState, 
   photos, 
@@ -27,36 +74,28 @@ export const Experience: React.FC<ExperienceProps> = ({
     const tempParticles: ParticleData[] = [];
     const tempPhotoPositions: PhotoData[] = [];
     const count = CONFIG.PARTICLE_COUNT;
-    const goldenAngle = Math.PI * (3 - Math.sqrt(5)); // ~2.3999 radians
+    const goldenAngle = Math.PI * (3 - Math.sqrt(5));
 
-    // 1. Ornaments (Spheres, Cubes)
+    // 1. Ornaments (Spheres, Cubes, Rings, Diamonds)
     for (let i = 0; i < count; i++) {
-      // Y Position: Linear distribution from bottom to top to ensure no vertical gaps
       const t = i / count; 
-      const yTree = CONFIG.TREE_HEIGHT * (t - 0.5); // Range: -Height/2 to Height/2
+      const yTree = CONFIG.TREE_HEIGHT * (t - 0.5);
       
-      // Cone radius at this specific height
       const normalizedY = (yTree + CONFIG.TREE_HEIGHT / 2) / CONFIG.TREE_HEIGHT; 
-      // Add slight curve to the cone shape (pow 0.8) for a fuller bottom look
       const maxRadiusAtY = CONFIG.TREE_RADIUS_BOTTOM * Math.pow((1 - normalizedY), 0.9) + 0.2;
       
-      // Phyllotaxis (Spiral) Pattern for perfect radial distribution
       const theta = i * goldenAngle; 
 
-      // Radius Depth:
-      // Most particles on surface (0.8-1.0), some inside for volume (0.0-0.8)
-      // This prevents the "hollow shell" look
-      const isSurface = Math.random() > 0.2;
+      const isSurface = Math.random() > 0.25;
       const rScale = isSurface 
-        ? 0.9 + Math.random() * 0.2  // Surface variation
-        : Math.random() * 0.8;       // Inner volume
+        ? 0.9 + Math.random() * 0.25
+        : Math.random() * 0.8;
       
       const rCurrent = maxRadiusAtY * rScale;
 
       const xTree = Math.cos(theta) * rCurrent;
       const zTree = Math.sin(theta) * rCurrent;
 
-      // Random Scatter Position
       const rScatter = CONFIG.SCATTER_RADIUS * Math.cbrt(Math.random());
       const thetaScatter = Math.random() * 2 * Math.PI;
       const phiScatter = Math.acos(2 * Math.random() - 1);
@@ -65,18 +104,35 @@ export const Experience: React.FC<ExperienceProps> = ({
       const yScatter = rScatter * Math.sin(phiScatter) * Math.sin(thetaScatter);
       const zScatter = rScatter * Math.cos(phiScatter);
 
-      const type = Math.random() > 0.65 ? 'sphere' : (Math.random() > 0.5 ? 'cube' : 'candy');
+      // --- Shape Distribution Strategy ---
+      const randShape = Math.random();
+      let type: ParticleData['type'] = 'sphere';
       
-      // Color Logic
-      const randColor = Math.random();
+      // More fancy shapes towards the surface
+      if (isSurface) {
+        if (randShape > 0.92) type = 'diamond'; // Rare fancy ornament
+        else if (randShape > 0.84) type = 'ring'; // Gold rings
+        else if (randShape > 0.6) type = 'sphere';
+        else type = 'cube';
+      } else {
+        type = Math.random() > 0.5 ? 'sphere' : 'candy';
+      }
+      
+      // --- Color Logic ---
       let color;
-      if (randColor > 0.8) color = COLORS.METALLIC_GOLD;
-      else if (randColor > 0.55) color = COLORS.CHRISTMAS_RED;
-      else if (randColor > 0.25) color = COLORS.BRIGHT_GREEN; // More bright green
-      else color = COLORS.MATTE_GREEN; // Add darker green base
+      const randColor = Math.random();
 
-      // Add occasional white "snow" particles
-      if (Math.random() > 0.92) color = COLORS.WHITE;
+      // Force special shapes to be Gold
+      if (type === 'diamond' || type === 'ring') {
+        color = COLORS.METALLIC_GOLD;
+      } else {
+        if (randColor > 0.75) color = COLORS.METALLIC_GOLD; // Increased gold probability
+        else if (randColor > 0.55) color = COLORS.CHRISTMAS_RED;
+        else if (randColor > 0.25) color = COLORS.BRIGHT_GREEN;
+        else color = COLORS.MATTE_GREEN;
+
+        if (Math.random() > 0.95) color = COLORS.WHITE;
+      }
 
       tempParticles.push({
         id: i,
@@ -84,22 +140,20 @@ export const Experience: React.FC<ExperienceProps> = ({
         positionTree: [xTree, yTree, zTree],
         positionScatter: [xScatter, yScatter, zScatter],
         color,
-        scale: Math.random() * 0.2 + 0.08, // Slightly smaller variance
+        scale: Math.random() * 0.2 + 0.08,
       });
     }
 
     // 2. Photos Cloud positions
     photos.forEach((photoUrl, i) => {
-      // Tree: Spiral around the outside
       const theta = (i / photos.length) * Math.PI * 8;
-      const yTree = (i / photos.length - 0.5) * CONFIG.TREE_HEIGHT * 0.7; // Keep photos more central vertically
+      const yTree = (i / photos.length - 0.5) * CONFIG.TREE_HEIGHT * 0.7;
       const normalizedY = (yTree + CONFIG.TREE_HEIGHT / 2) / CONFIG.TREE_HEIGHT;
       const radiusAtY = (CONFIG.TREE_RADIUS_BOTTOM + 1.2) * (1 - normalizedY) + 0.5;
 
       const xTree = Math.cos(theta) * radiusAtY;
       const zTree = Math.sin(theta) * radiusAtY;
 
-      // Scatter: Random
       const xScatter = (Math.random() - 0.5) * 16;
       const yScatter = (Math.random() - 0.5) * 12;
       const zScatter = (Math.random() - 0.5) * 8;
@@ -121,14 +175,12 @@ export const Experience: React.FC<ExperienceProps> = ({
   useFrame((state, delta) => {
     if (!groupRef.current) return;
 
-    // Camera rotation based on hand in SCATTER mode
     if (appState === AppState.SCATTER) {
-        const targetX = handPositionRef.current.y * 0.5; // Look up/down
-        const targetY = handPositionRef.current.x * 0.5; // Rotate around Y
+        const targetX = handPositionRef.current.y * 0.5;
+        const targetY = handPositionRef.current.x * 0.5;
         damp3(state.camera.rotation, [targetX, targetY, 0], 0.5, delta);
     } else if (appState === AppState.TREE) {
-        // Auto rotate tree slowly
-        groupRef.current.rotation.y += delta * 0.15; // Slightly slower rotation for majesty
+        groupRef.current.rotation.y += delta * 0.15;
         damp3(state.camera.position, [0, 0, 18], 1, delta);
         damp3(state.camera.rotation, [0, 0, 0], 1, delta);
     } else if (appState === AppState.FOCUS) {
@@ -139,36 +191,30 @@ export const Experience: React.FC<ExperienceProps> = ({
 
   return (
     <>
-      <Environment preset="forest" /> {/* Changed to forest for better reflections */}
-      <ambientLight intensity={0.4} color={COLORS.MATTE_GREEN} />
-      <pointLight position={[10, 10, 10]} intensity={1.5} color={COLORS.METALLIC_GOLD} />
+      <Environment preset="city" /> 
+      <ambientLight intensity={0.5} color={COLORS.MATTE_GREEN} />
+      {/* Warm lights to highlight gold */}
+      <pointLight position={[10, 10, 10]} intensity={2.5} color="#ffaa00" />
+      <pointLight position={[-10, 5, 10]} intensity={1.5} color="#ffddaa" />
       <spotLight position={[-10, 15, 0]} angle={0.3} penumbra={1} intensity={2} color={COLORS.CHRISTMAS_RED} castShadow />
       
-      {/* Backlight for depth */}
       <pointLight position={[0, 0, -10]} intensity={1} color="#004400" />
 
       <group ref={groupRef}>
-        {/* Render Particles */}
+        {/* The Golden Garland */}
+        <Garland appState={appState} />
+
+        {/* Particles */}
         {particles.map((p) => (
-          <Particle 
-            key={p.id} 
-            data={p} 
-            appState={appState} 
-          />
+          <Particle key={p.id} data={p} appState={appState} />
         ))}
 
-        {/* Render Photos */}
+        {/* Photos */}
         {photoPositions.map((p, i) => (
-          <PhotoMesh 
-            key={p.id} 
-            data={p} 
-            index={i}
-            appState={appState} 
-            isFocused={focusedPhotoIndex === i}
-          />
+          <PhotoMesh key={p.id} data={p} index={i} appState={appState} isFocused={focusedPhotoIndex === i} />
         ))}
         
-        {/* Central Star at top of tree */}
+        {/* Top Star */}
         <Star appState={appState} />
       </group>
     </>
@@ -180,34 +226,33 @@ const Particle: React.FC<{ data: ParticleData; appState: AppState }> = ({ data, 
   
   useFrame((state, delta) => {
     if (!meshRef.current) return;
-    
-    // Determine target position
     const target = appState === AppState.TREE ? data.positionTree : data.positionScatter;
-    
-    // Smooth transition
     damp3(meshRef.current.position, target, 0.6 + Math.random() * 0.5, delta);
-    
-    // Gentle floating
     meshRef.current.rotation.x += delta * 0.5;
     meshRef.current.rotation.y += delta * 0.5;
   });
 
-  // Optimize: Re-use geometries implicitly by type is tricky in map, 
-  // but for 1200 simple meshes React Three Fiber should handle it okay on desktop.
-  
+  // Helper to determine geometry based on type
+  const renderGeometry = () => {
+    switch (data.type) {
+      case 'cube': return <boxGeometry args={[0.7, 0.7, 0.7]} />;
+      case 'ring': return <torusGeometry args={[0.3, 0.12, 8, 16]} />;
+      case 'diamond': return <octahedronGeometry args={[0.5, 0]} />;
+      case 'candy': return <cylinderGeometry args={[0.1, 0.1, 0.8, 8]} />;
+      case 'sphere':
+      default: return <sphereGeometry args={[0.4, 16, 16]} />;
+    }
+  };
+
   return (
     <mesh ref={meshRef} scale={data.scale}>
-      {data.type === 'sphere' ? (
-        <sphereGeometry args={[1, 8, 8]} /> // Reduced polygon count for performance
-      ) : (
-        <boxGeometry args={[1, 1, 1]} />
-      )}
+      {renderGeometry()}
       <meshStandardMaterial 
         color={data.color} 
-        metalness={0.8} 
-        roughness={0.2} 
+        metalness={data.type === 'ring' || data.type === 'diamond' ? 1.0 : 0.6} 
+        roughness={data.type === 'ring' || data.type === 'diamond' ? 0.1 : 0.3} 
         emissive={data.color}
-        emissiveIntensity={0.2}
+        emissiveIntensity={data.color === COLORS.METALLIC_GOLD ? 0.6 : 0.2}
       />
     </mesh>
   );
@@ -220,33 +265,26 @@ const PhotoMesh: React.FC<{
   index: number;
 }> = ({ data, appState, isFocused, index }) => {
   const ref = useRef<THREE.Group>(null);
-  const materialRef = useRef<THREE.MeshBasicMaterial>(null);
 
   useFrame((state, delta) => {
     if (!ref.current) return;
 
     let targetPos = appState === AppState.TREE ? data.positionTree : data.positionScatter;
     let targetScale = 1.0;
-    let targetRot = [0, 0, 0] as [number, number, number];
 
     if (appState === AppState.FOCUS) {
       if (isFocused) {
-        // Bring to front center
         targetPos = [0, 0, 5]; 
         targetScale = 3.5;
-        targetRot = [0, 0, 0];
       } else {
-        // Push others back and fade
         const originalScatter = data.positionScatter;
         targetPos = [originalScatter[0] * 1.5, originalScatter[1] * 1.5, originalScatter[2] - 10];
       }
     } else if (appState === AppState.SCATTER) {
-      // Look at camera roughly
       ref.current.lookAt(state.camera.position);
     } else {
-       // Tree mode: face outward from center
        ref.current.lookAt(0, ref.current.position.y, 0);
-       ref.current.rotation.y += Math.PI; // Flip to face out
+       ref.current.rotation.y += Math.PI; 
     }
 
     damp3(ref.current.position, targetPos, 0.5, delta);
@@ -262,11 +300,10 @@ const PhotoMesh: React.FC<{
     <group ref={ref}>
       <Image 
         url={data.url} 
-        scale={[1.5, 1.5]} // Base size
+        scale={[1.5, 1.5]} 
         transparent
         opacity={appState === AppState.FOCUS && !isFocused ? 0.1 : 1}
       />
-      {/* Frame border */}
       <mesh position={[0, 0, -0.01]}>
         <planeGeometry args={[1.6, 1.6]} />
         <meshStandardMaterial color={COLORS.METALLIC_GOLD} metalness={1} roughness={0.1} />
@@ -281,14 +318,19 @@ const Star: React.FC<{ appState: AppState }> = ({ appState }) => {
     if (!ref.current) return;
     const targetY = appState === AppState.TREE ? CONFIG.TREE_HEIGHT / 2 + 1 : 10;
     damp3(ref.current.position, [0, targetY, 0], 1, delta);
-    ref.current.rotation.z += delta;
+    ref.current.rotation.y += delta;
   });
 
   return (
     <mesh ref={ref}>
       <octahedronGeometry args={[0.8, 0]} />
-      <meshBasicMaterial color={COLORS.METALLIC_GOLD} toneMapped={false} />
-      <pointLight intensity={2} color="yellow" distance={5} />
+      <meshStandardMaterial 
+        color={COLORS.METALLIC_GOLD} 
+        emissive={COLORS.METALLIC_GOLD} 
+        emissiveIntensity={2} 
+        toneMapped={false} 
+      />
+      <pointLight intensity={2} color="yellow" distance={8} decay={2} />
     </mesh>
   );
 };

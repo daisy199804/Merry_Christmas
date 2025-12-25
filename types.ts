@@ -13,7 +13,7 @@ export enum GestureType {
 
 export interface ParticleData {
   id: number;
-  type: 'sphere' | 'cube' | 'candy';
+  type: 'sphere' | 'cube' | 'candy' | 'ring' | 'diamond';
   positionTree: [number, number, number];
   positionScatter: [number, number, number];
   color: string;
