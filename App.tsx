@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useRef } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing';
@@ -92,7 +93,8 @@ const App: React.FC = () => {
           handPositionRef={handPositionRef}
         />
 
-        <EffectComposer disableNormalPass>
+        {/* Removed disableNormalPass as it is not a valid prop in current @react-three/postprocessing types */}
+        <EffectComposer>
           <Bloom luminanceThreshold={0.5} mipmapBlur intensity={1.5} radius={0.6} />
           <Vignette eskil={false} offset={0.1} darkness={0.6} />
         </EffectComposer>

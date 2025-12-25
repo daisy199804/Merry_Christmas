@@ -1,5 +1,5 @@
 import React from 'react';
-import { Upload, Hand, Grip, Expand, ZoomIn, Trash2 } from 'lucide-react';
+import { Upload, Hand, Grip, ZoomIn, Trash2 } from 'lucide-react';
 import { AppState, GestureType } from '../types';
 
 interface InterfaceOverlayProps {
